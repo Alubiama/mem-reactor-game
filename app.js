@@ -26,7 +26,7 @@
   function render() {
     showPhase();
     const turn = game ? game.turn : 0;
-    $('turn-pill').textContent = !game ? 'READY' : phase === 'finale' ? 'THE END' : `TURN ${Math.min(turn + 1, game.players)} / ${game.players}`;
+    $('turn-pill').textContent = !game ? 'READY' : phase === 'finale' ? 'THE END' : `TURN ${phase === 'reaction' ? turn : turn + 1} / ${game.players}`;
     $('open-count').textContent = game ? engine.openMutations(game).length : '0';
     $('track').innerHTML = game ? Array.from({length:game.players}, (_,i) => `<span class="${i<turn?'done':''}"></span>`).join('') : '';
     $('trail').innerHTML = game ? game.history.map(h => `<span class="${h.kind==='fix'?'fixed':''}">${escapeHtml(h.player)} · ${escapeHtml(h.kind==='fix'?'FIX ': 'MUTATE ')}${escapeHtml(h.id.slice(1))}</span>`).join('') : '';
