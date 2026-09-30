@@ -139,6 +139,26 @@
     }
   }
 
+  async function copyGameLink() {
+    const text = 'One phone. One cake. Your chaos. Play Mem Reactor: The Last Cake with 4–8 friends: https://alubiama.itch.io/mem-reactor-the-last-cake';
+    try {
+      if (!navigator.clipboard) throw new Error('Clipboard API unavailable');
+      await navigator.clipboard.writeText(text);
+      $('toast').textContent = 'Game link copied. Send it to your group.';
+    } catch (error) {
+      const field = document.createElement('textarea');
+      field.value = text;
+      field.setAttribute('readonly', '');
+      field.style.position = 'fixed';
+      field.style.opacity = '0';
+      document.body.appendChild(field);
+      field.select();
+      const copied = document.execCommand('copy');
+      field.remove();
+      $('toast').textContent = copied ? 'Game link copied. Send it to your group.' : 'Copy unavailable. Use alubiama.itch.io/mem-reactor-the-last-cake';
+    }
+  }
+
   $('start-group').addEventListener('click', () => start(false));
   $('start-solo').addEventListener('click', () => start(true));
   $('reveal').addEventListener('click', () => { phase='choose'; render(); });
@@ -155,5 +175,6 @@
   $('continue').addEventListener('click', () => { phase=game.turn===game.players?'finale':'handoff'; render(); });
   $('again').addEventListener('click', () => { game=null; phase='setup'; render(); });
   $('share').addEventListener('click', shareStory);
+  $('copy-link').addEventListener('click', copyGameLink);
   render();
 })();
