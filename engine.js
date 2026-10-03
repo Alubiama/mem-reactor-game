@@ -41,7 +41,7 @@
   function play(state, kind, id) {
     const available = options(state);
     if (kind === 'mutation' && !available.mutations.includes(id)) throw new Error('Mutation not offered');
-    if (kind === 'fix' && available.fix !== id) throw new Error('Only the latest open mutation can be fixed');
+    if (kind === 'fix' && (available.fix !== id || !state.order.includes(id))) throw new Error('Only the latest card mutation can use a card fix');
     if (kind !== 'mutation' && kind !== 'fix') throw new Error('Unknown move');
     const history = state.history.map(entry => ({ ...entry }));
     const turn = state.turn + 1;
@@ -53,11 +53,35 @@
     return { ...state, turn, history };
   }
 
+  function playCustom(state, kind, fields) {
+    if (state.turn >= state.players) throw new Error('Round is over');
+    if (kind !== 'mutation' && kind !== 'fix') throw new Error('Unknown move');
+    const clean = value => typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
+    const name = clean(fields && fields.name);
+    const primary = clean(fields && fields[kind === 'fix' ? 'change' : 'power']);
+    const consequence = clean(fields && fields[kind === 'fix' ? 'quirk' : 'problem']);
+    if (name.length < 2 || name.length > 48 || primary.length < 8 || primary.length > 140 || consequence.length < 8 || consequence.length > 140) {
+      throw new Error('Use a 2–48 character name and 8–140 characters for each detail');
+    }
+    const history = state.history.map(entry => ({ ...entry }));
+    const turn = state.turn + 1;
+    let id = `C${turn}`;
+    if (kind === 'fix') {
+      const target = [...history].reverse().find(h => h.kind === 'mutation' && !h.fixedBy);
+      if (!target) throw new Error('No open problem to fix');
+      target.fixedBy = turn;
+      id = target.id;
+    }
+    const custom = kind === 'fix' ? { name, change: primary, quirk: consequence } : { name, power: primary, problem: consequence };
+    history.push({ kind, id, turn, player: state.solo ? 'YOU' : `P${turn}`, custom });
+    return { ...state, turn, history };
+  }
+
   function outcome(state) {
     if (state.turn !== state.players) throw new Error('Round is not over');
     const open = openMutations(state).length;
     return { open, type: open === 0 ? 'safe' : open < 4 ? 'messy' : 'disaster' };
   }
 
-  return { create, options, play, openMutations, outcome, shuffle };
+  return { create, options, play, playCustom, openMutations, outcome, shuffle };
 });

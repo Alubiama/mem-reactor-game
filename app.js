@@ -5,8 +5,20 @@
   const $ = id => document.getElementById(id);
   const panels = ['setup', 'handoff', 'choose', 'reaction', 'finale'];
   const escapeHtml = value => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+  const storageKey = 'mem-reactor-round-v4';
   let game = null;
   let phase = 'setup';
+  let authorKind = 'mutation';
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(storageKey) || 'null');
+    if (saved && saved.game && Array.isArray(saved.game.history) && saved.game.history.length <= 8 &&
+        Number.isInteger(saved.game.players) && saved.game.players >= 4 && saved.game.players <= 8 &&
+        Number.isInteger(saved.game.turn) && saved.game.turn === saved.game.history.length &&
+        panels.includes(saved.phase) && saved.phase !== 'setup') {
+      game = saved.game;
+      phase = saved.phase;
+    }
+  } catch (_) { /* A damaged tab snapshot starts a fresh round. */ }
 
   function currentSeed() {
     if (window.crypto && window.crypto.getRandomValues) return window.crypto.getRandomValues(new Uint32Array(1))[0];
@@ -15,7 +27,7 @@
 
   function start(solo) {
     game = engine.create({ players: solo ? 6 : Number($('players').value), solo, seed: currentSeed(), cards });
-    phase = 'handoff';
+    phase = solo ? 'choose' : 'handoff';
     render();
   }
 
@@ -25,6 +37,7 @@
 
   function render() {
     showPhase();
+    document.body.dataset.phase = phase;
     const turn = game ? game.turn : 0;
     $('turn-pill').textContent = !game ? 'READY' : phase === 'finale' ? 'THE END' : `TURN ${phase === 'reaction' ? turn : turn + 1} / ${game.players}`;
     $('open-count').textContent = game ? engine.openMutations(game).length : '0';
@@ -35,6 +48,22 @@
     if (phase === 'choose') renderChoices();
     if (phase === 'reaction') renderReaction();
     if (phase === 'finale') renderFinale();
+    if (game) {
+      try { sessionStorage.setItem(storageKey, JSON.stringify({ game, phase })); }
+      catch (_) { /* Private browsing may disable tab storage; play still works. */ }
+    }
+    const focusTarget = { handoff:'handoff-title', choose:'choose-title', reaction:'reaction-title', finale:'finale-title' }[phase];
+    if (focusTarget) {
+      requestAnimationFrame(() => {
+        const target = $(focusTarget);
+        target.setAttribute('tabindex', '-1');
+        target.focus({ preventScroll: true });
+        if (window.innerWidth <= 850) {
+          const top = $('choose').closest('.control').getBoundingClientRect().top + window.scrollY - 155;
+          window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+        }
+      });
+    }
   }
 
   function renderHandoff() {
@@ -47,11 +76,14 @@
   function renderChoices() {
     $('choose-kicker').textContent = `${game.solo ? 'SOLO' : 'PLAYER '+(game.turn+1)} · TURN ${game.turn+1}/${game.players}`;
     const offered = engine.options(game);
+    $('invent-fix').hidden = !offered.fix;
+    $('author-form').hidden = true;
+    $('author-error').textContent = '';
     const mutationButtons = offered.mutations.map(id => {
       const card = byId[id];
       return `<button class="card" type="button" data-kind="mutation" data-id="${id}"><span class="card-meta"><span>MAKE IT WEIRDER</span><span>${id}</span></span><span class="card-name">${escapeHtml(card.mutation.name)}</span><span class="card-line"><b>POWER</b> ${escapeHtml(card.mutation.power)}</span><span class="card-line"><b>TROUBLE</b> ${escapeHtml(card.mutation.problem)}</span></button>`;
     });
-    if (offered.fix) {
+    if (offered.fix && byId[offered.fix]) {
       const card = byId[offered.fix];
       mutationButtons.push(`<button class="card fix" type="button" data-kind="fix" data-id="${offered.fix}"><span class="card-meta"><span>MAKE IT WORK</span><span>FIX ${offered.fix.slice(1)}</span></span><span class="card-name">${escapeHtml(card.fix.name)}</span><span class="card-line"><b>TRANSFORM</b> ${escapeHtml(card.fix.change)}</span><span class="card-line"><b>NEW QUIRK</b> ${escapeHtml(card.fix.quirk)}</span></button>`);
     }
@@ -60,38 +92,30 @@
 
   function renderReaction() {
     const move = game.history.at(-1);
-    const card = byId[move.id];
     const fixed = move.kind === 'fix';
-    $('reaction-title').textContent = fixed ? `${card.fix.name} SAVES THE DAY?` : `${card.mutation.name} CHANGES EVERYTHING.`;
+    const detail = move.custom || byId[move.id][fixed ? 'fix' : 'mutation'];
+    $('reaction-title').textContent = fixed ? `${detail.name} SAVES THE DAY?` : `${detail.name} CHANGES EVERYTHING.`;
     $('reaction-card').classList.toggle('fix', fixed);
     $('reaction-card').innerHTML = fixed
-      ? `<strong>PROBLEM REINVENTED</strong><p>${escapeHtml(card.fix.change)}</p><p><b>New price:</b> ${escapeHtml(card.fix.quirk)}</p>`
-      : `<strong>NEW POWER, NEW TROUBLE</strong><p>${escapeHtml(card.mutation.power)}</p><p><b>But:</b> ${escapeHtml(card.mutation.problem)}</p>`;
+      ? `<strong>PROBLEM REINVENTED</strong><p>${escapeHtml(detail.change)}</p><p><b>New price:</b> ${escapeHtml(detail.quirk)}</p>`
+      : `<strong>NEW POWER, NEW TROUBLE</strong><p>${escapeHtml(detail.power)}</p><p><b>But:</b> ${escapeHtml(detail.problem)}</p>`;
     $('continue').textContent = game.turn === game.players ? 'SEE THE ENDING' : game.solo ? 'NEXT MOVE' : 'PASS THE SCREEN';
   }
 
   function renderFinale() {
     const result = engine.outcome(game);
-    const titles = {
-      safe: ['CAKE DELIVERED.', 'Every problem was transformed. The courier reaches the Moon with a very strange story.'],
-      messy: ['DELIVERED. SORT OF.', `${result.open} problem${result.open===1?'':'s'} followed the courier to the party. The guests will talk about this cake for years.`],
-      disaster: ['CAKE DISASTER.', `${result.open} problems collided before delivery. The courier survived. The cake had other plans.`]
-    };
-    $('finale-title').textContent = titles[result.type][0];
-    $('result').className = `result ${result.type}`;
-    $('result-head').textContent = `${result.open} UNFIXED ${result.open===1?'PROBLEM':'PROBLEMS'}`;
-    $('result-desc').textContent = titles[result.type][1];
     const open = engine.openMutations(game);
-    const endings = open.slice(-2).map(h => byId[h.id].mutation.ending);
-    if (!endings.length) {
-      const lastFix = [...game.history].reverse().find(h => h.kind === 'fix');
-      endings.push(`One last quirk: ${byId[lastFix.id].fix.quirk}`);
-    }
-    $('ending-points').innerHTML = endings.map(text => `<li>${escapeHtml(text)}</li>`).join('');
+    const feature = result.type === 'safe' ? [...game.history].reverse().find(h => h.kind === 'fix') : open.at(-1);
+    const detail = feature.custom || byId[feature.id][feature.kind === 'fix' ? 'fix' : 'mutation'];
+    $('finale-title').textContent = { safe:'CAKE DELIVERED.', messy:'DELIVERED. SORT OF.', disaster:'CAKE DISASTER.' }[result.type];
+    $('finale-story').textContent = feature.kind === 'fix'
+      ? `${detail.name} saved the day. ${detail.change} But ${detail.quirk}`
+      : `${detail.name} changed the mission. ${detail.power} But ${detail.problem}`;
+    $('result-head').textContent = result.open === 0 ? 'EVERY PROBLEM REINVENTED' : `${result.open} UNFIXED ${result.open===1?'PROBLEM':'PROBLEMS'}`;
     $('timeline').innerHTML = game.history.map(h => {
-      const card = byId[h.id];
-      const detail = h.kind === 'fix' ? card.fix.change : card.mutation.problem;
-      return `<li class="${h.kind==='fix'?'fix':''}"><b>${escapeHtml(h.player)}</b> · ${escapeHtml(h.kind==='fix'?'FIXED':'ADDED')} ${escapeHtml(h.kind==='fix'?card.fix.name:card.mutation.name)} — ${escapeHtml(detail)}</li>`;
+      const move = h.custom || byId[h.id][h.kind === 'fix' ? 'fix' : 'mutation'];
+      const description = h.kind === 'fix' ? move.change : move.problem;
+      return `<li class="${h.kind==='fix'?'fix':''}"><b>${escapeHtml(h.player)}</b> · ${escapeHtml(h.kind==='fix'?'FIXED':'ADDED')} ${escapeHtml(move.name)} — ${escapeHtml(description)}</li>`;
     }).join('');
     $('toast').textContent = '';
   }
@@ -122,13 +146,32 @@
     if (has('M2') && fixed('M2')) shapes.push('<path d="M388 245 L388 227 M426 245 L426 227" stroke="#f09d48" stroke-width="4"/><path d="M388 230 Q380 219 389 213 Q399 221 388 230 M426 230 Q418 219 427 213 Q437 221 426 230" fill="#ffcb57"/>');
     $('creature').innerHTML = shapes.join('');
     $('creature').setAttribute('aria-label', `${status.size} visible mutation traits; ${openCount} unresolved problems; cake courier on the Moon`);
+    const authored = game && [...game.history].reverse().find(h => h.custom);
+    $('authored-tag').hidden = !authored;
+    if (authored) {
+      $('authored-tag').textContent = `${authored.kind === 'fix' ? '✦ REMIXED' : '✦ PLAYER INVENTED'} · ${authored.custom.name}`;
+      $('authored-tag').classList.toggle('fixed', authored.kind === 'fix');
+    }
+  }
+
+  function openAuthor(kind) {
+    if (kind === 'fix' && !engine.options(game).fix) return;
+    authorKind = kind;
+    $('author-form').reset();
+    $('author-error').textContent = '';
+    $('author-title').textContent = kind === 'fix' ? 'INVENT THE FIX' : 'INVENT THE MUTATION';
+    $('author-hint').textContent = kind === 'fix' ? 'Transform the latest unfixed problem. The solution needs a funny new price.' : 'Give the courier a useful power and one deliciously awkward problem.';
+    $('author-primary-label').textContent = kind === 'fix' ? 'How does it solve the problem?' : 'What useful power does it give?';
+    $('author-consequence-label').textContent = kind === 'fix' ? 'What new quirk comes with it?' : 'What trouble does it cause?';
+    $('author-form').hidden = false;
+    $('author-name').focus();
   }
 
   async function shareStory() {
     const result = engine.outcome(game);
-    const moves = game.history.map(h => `${h.player}: ${h.kind==='fix'?'fixed':'added'} ${h.kind==='fix'?byId[h.id].fix.name:byId[h.id].mutation.name}`).join('\n');
+    const moves = game.history.map(h => `${h.player}: ${h.kind==='fix'?'fixed':'added'} ${(h.custom || byId[h.id][h.kind==='fix'?'fix':'mutation']).name}`).join('\n');
     const link = location.protocol === 'https:' ? `\n${location.href.split('#')[0]}` : '';
-    const text = `MEM REACTOR · ${$('finale-title').textContent}\n${result.open} unfixed problems\n${moves}${link}`;
+    const text = `MEM REACTOR · ${$('finale-title').textContent}\n${$('finale-story').textContent}\n${result.open} unfixed problems\n${moves}${link}`;
     try {
       if (navigator.share) { await navigator.share({ text }); $('toast').textContent = 'Story shared.'; return; }
       await navigator.clipboard.writeText(text);
@@ -161,6 +204,23 @@
 
   $('start-group').addEventListener('click', () => start(false));
   $('start-solo').addEventListener('click', () => start(true));
+  $('invent-mutation').addEventListener('click', () => openAuthor('mutation'));
+  $('invent-fix').addEventListener('click', () => openAuthor('fix'));
+  $('author-cancel').addEventListener('click', () => { $('author-form').hidden = true; $('invent-mutation').focus(); });
+  $('author-form').addEventListener('submit', event => {
+    event.preventDefault();
+    const fields = { name:$('author-name').value };
+    fields[authorKind === 'fix' ? 'change' : 'power'] = $('author-primary').value;
+    fields[authorKind === 'fix' ? 'quirk' : 'problem'] = $('author-consequence').value;
+    try {
+      game = engine.playCustom(game, authorKind, fields);
+      phase = 'reaction';
+      $('art').classList.remove('pop');
+      void $('art').offsetWidth;
+      $('art').classList.add('pop');
+      render();
+    } catch (error) { $('author-error').textContent = error.message; }
+  });
   $('reveal').addEventListener('click', () => { phase='choose'; render(); });
   $('card-list').addEventListener('click', event => {
     const button = event.target.closest('button[data-kind]');
@@ -172,8 +232,8 @@
     $('art').classList.add('pop');
     render();
   });
-  $('continue').addEventListener('click', () => { phase=game.turn===game.players?'finale':'handoff'; render(); });
-  $('again').addEventListener('click', () => { game=null; phase='setup'; render(); });
+  $('continue').addEventListener('click', () => { phase=game.turn===game.players?'finale':game.solo?'choose':'handoff'; render(); });
+  $('again').addEventListener('click', () => { game=null; phase='setup'; try { sessionStorage.removeItem(storageKey); } catch (_) {} render(); });
   $('share').addEventListener('click', shareStory);
   $('copy-link').addEventListener('click', copyGameLink);
   render();
