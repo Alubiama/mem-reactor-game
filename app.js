@@ -109,9 +109,12 @@
     const detail = feature.custom || byId[feature.id][feature.kind === 'fix' ? 'fix' : 'mutation'];
     $('finale-title').textContent = { safe:'CAKE DELIVERED.', messy:'DELIVERED. SORT OF.', disaster:'CAKE DISASTER.' }[result.type];
     $('finale-story').textContent = feature.kind === 'fix'
-      ? `${detail.name} saved the day. ${detail.change} But ${detail.quirk}`
-      : `${detail.name} changed the mission. ${detail.power} But ${detail.problem}`;
+      ? `${detail.name} saved the day. ${detail.change} New price: ${detail.quirk}`
+      : `${detail.name} changed the mission. ${detail.power} The cost: ${detail.problem}`;
     $('result-head').textContent = result.open === 0 ? 'EVERY PROBLEM REINVENTED' : `${result.open} UNFIXED ${result.open===1?'PROBLEM':'PROBLEMS'}`;
+    const playerIdea = [...game.history].reverse().find(h => h.custom);
+    $('authored-spotlight').hidden = !playerIdea;
+    if (playerIdea) $('authored-spotlight').textContent = `PLAYER IDEA · ${playerIdea.custom.name}`;
     $('timeline').innerHTML = game.history.map(h => {
       const move = h.custom || byId[h.id][h.kind === 'fix' ? 'fix' : 'mutation'];
       const description = h.kind === 'fix' ? move.change : move.problem;
